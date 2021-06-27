@@ -13,7 +13,7 @@ import data_gen_torch
 import math
 import project_vars
 
-from copy import deepcopy
+# from copy import deepcopy
 from matplotlib import pyplot as plt
 from torch.optim.lr_scheduler import _LRScheduler
 from datetime import datetime
@@ -104,14 +104,14 @@ def train_single(epochs = 3, draw_plot = True, roll_avg_period = 100):
     #     plt.plot(losses)
     #     plt.show()
 
-def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 10, load_model = True, logs = True, model_name = "best_weights.pt", learning_rate = 1e-5, phonemes = False, shutdown = False, norm = False, is_2d = False, reset = True):
+def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 10, load_model = True, logs = True, model_name = "best_weights.pt", learning_rate = 1e-5, phonemes = False, shutdown = False, norm = False, is_2d = False, reset = True, batch_loops = 1):
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
     if phonemes:
         model = models.wav2phoneme_torch_2d() if is_2d else models.wav2phoneme_torch()
     else:
-        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch()
+        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch_test2()
         
     model_path = "models\\{}\\{}\\{}\\".format("phonemes" if phonemes else "letters", model.__class__.__name__, project_vars.base_channels) + ("norm\\" if norm else "")
     Path(model_path).mkdir(parents=True, exist_ok=True)
@@ -124,8 +124,8 @@ def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr = 1e-4, max_lr = 1e-3, step_size_up=100, cycle_momentum=False, verbose = False)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=2, threshold = 0.001)
     
-    # losses = []
-    # roll_avg_period = round(roll_avg_period / batch_size)
+    #losses = []
+    #roll_avg_period = round(roll_avg_period / batch_size)
     
     # lr_history = []
     no_improvements = 0
@@ -169,16 +169,16 @@ def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 
                 gen = data_gen_torch.phoneme_generator_torch_batch(batch_size, device, is_train = training_phase, norm = norm, is_2d = is_2d) if phonemes else data_gen_torch.data_generator_torch_batch(batch_size, device, is_train = training_phase, norm = norm, is_2d = is_2d)
                 
                 # j, avg_sum = 0, 0
-                i, running_loss = 0, 0.0
+                i, batch_loop_inc, running_loss = 0, 0, 0.0
                 
                 for x, y, y_lengths in gen:
                     
                     y_preds = []
-                    pred_lengths = torch.zeros(size = (len(y_lengths), ), dtype=torch.int32)
+                    # pred_lengths = torch.zeros(size = (len(y_lengths), ), dtype=torch.int32)
+                    pred_lengths = torch.IntTensor([math.floor(el.shape[1] / 2 - 1) for el in x])
                     
-                    for idx, in_data in enumerate(x):
+                    for idx, in_data in enumerate(x): # predictions are made individually due to varied length
                         pred = model(torch.unsqueeze(in_data, 0)) # 1 * C * T
-                        pred_lengths[idx] = pred.shape[2]
                         y_preds.append(pred)
                     
                     # for pair in zip(pred_lengths, y_lengths): # targ length must be less than pred length
@@ -198,9 +198,13 @@ def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 
                     i += 1
                     
                     if training_phase:
+                        batch_loop_inc += 1
                         loss.backward()
-                        optimizer.step()
-                        optimizer.zero_grad()
+                        if batch_loop_inc == batch_loops:
+                            optimizer.step()
+                            optimizer.zero_grad()
+                            batch_loop_inc = 0
+                            
                         
                         # scheduler.step() # cyclic scheduler
                         # lr_history.extend(scheduler.get_last_lr())
@@ -208,9 +212,9 @@ def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 
                         # avg_sum += loss.item()
                         # j += 1
                         # if not j % roll_avg_period:
-                        #     print("Rolling Average: {}".format(round(avg_sum / roll_avg_period, 3)))
-                        #     losses.append(avg_sum / roll_avg_period)
-                        #     j, avg_sum = 0, 0
+                            # print("Rolling Average: {}".format(round(avg_sum / roll_avg_period, 3)))
+                            # losses.append(avg_sum / roll_avg_period)
+                            # j, avg_sum = 0, 0
                 
                 epoch_loss = running_loss / i
                 stats[phase] = epoch_loss
@@ -254,6 +258,13 @@ def train_batch(epochs = 10, batch_size = 10, roll_avg_period = 200, patience = 
             
     if shutdown:
         system('shutdown -s')
+
+def alt_loop(x, loss_fn, model, y, y_lengths): # alternative training loop where inputs are padded, slower than non-padded inputs
+    
+    preds = model((torch.nn.utils.rnn.pad_sequence([el.T for el in x])).permute(1, 2, 0))
+    loss = loss_fn(preds.permute(2, 0, 1), torch.Tensor(y), torch.IntTensor([math.floor(el.shape[1] / 2 - 1) for el in x]), torch.Tensor(y_lengths).to(torch.int32))
+    
+    return loss
         
 def eval_cycle(model, device, batch_size = 10, phones = False, norm = False): # tests model on eval dataset and returns score
     
@@ -283,7 +294,7 @@ def eval_cycle(model, device, batch_size = 10, phones = False, norm = False): # 
     
     return running_loss / i
 
-def test_weights(model_class, phones = False, norm = False): # takes existing weights and oututs eval scores
+def test_weights(model_class, phones = False, norm = False): # takes existing weights and outputs eval scores
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
@@ -322,7 +333,7 @@ def print_log_msg(msg, sess_name, mode = "a"):
         with open("logs\\{}.txt".format(sess_name), mode) as f:
             f.write(str(msg) + "\n")
             
-def print_history(history): # plots training and eval score progress over epochs
+def plot_history(history): # plots training and eval score progress over epochs
     train_scores, eval_scores = [], []
     for el in history:
         train_scores.append(el["train"])
@@ -334,32 +345,36 @@ def print_history(history): # plots training and eval score progress over epochs
     ax1.set_title("Train")
     ax2.plot(eval_scores)
     ax2.set_title("Eval")
+    
+    # fig.show()
+    
+    # input("hi")
+    
+def save_new(): # save existing weights to new model
+    model = models.wav2letter_torch_test2()
+    model.load_state_dict(torch.load("models\\letters\\wav2letter_torch\\13\\best_weights.pt"))
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    e_loss = eval_cycle(model, device, batch_size = 10, phones = False, norm = False)
+    print(e_loss)
+    torch.save(model.state_dict(), "models\\letters\\wav2letter_torch_test2\\13\\best_weights.pt")
+    
+# save_new()
 
 train_batch(
     batch_size = 20,
-    epochs = 2,
-    learning_rate = 5e-5,
-    shutdown = False,
-    load_model = False,
+    epochs = 15,
+    learning_rate = 3e-7,
+    shutdown = True,
+    load_model = True,
     phonemes = False,
     logs = True,
     is_2d = False,
-    norm = True,
-    model_name = "demo")
-    
-# train_batch(
-#     batch_size = 20,
-#     epochs = 2,
-#     learning_rate = 5e-5,
-#     shutdown = True,
-#     load_model = True,
-#     phonemes = False,
-#     logs = True,
-#     is_2d = False,
-#     norm = True,
-#     model_name = "test")
+    norm = False,
+    batch_loops = 10,
+    reset = False)
 
-# print_history(load(open("models\\letters\\wav2letter_torch\\13\\norm\\test_history.pck", "rb")))
+# plot_history(load(open("models\\letters\\wav2letter_torch_test\\13\\norm\\best_weights.pt_history.pck", "rb")))
 
 # train_single(epochs = 3, draw_plot = True, roll_avg_period = 100)
 #test_weights(models.wav2letter_torch, phones = False)

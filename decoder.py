@@ -20,15 +20,13 @@ def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = F
     
     if phonemes:
         model = models.wav2phoneme_torch_2d() if is_2d else models.wav2phoneme_torch()
-        model_path = "models\\phonemes\\" + model_name
         to_target = [None] + list(project_vars.phoneme_map.keys())
     else:
-        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch()
-        model_path = "models\\letters\\" + model_name
+        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch_test2()
         to_target = [None] + list(project_vars.letter_map.keys())
         
     model.to(device)
-    model_path = "models\\{}\\{}\\{}\\".format("phonemes" if phonemes else "letters", model.__class__.__name__, project_vars.base_channels)
+    model_path = "models\\{}\\{}\\{}\\{}".format("phonemes" if phonemes else "letters", model.__class__.__name__, project_vars.base_channels, "norm\\" if norm else "")
     Path(model_path).mkdir(parents=True, exist_ok=True)
     model.load_state_dict(torch.load(model_path + model_name))
     
@@ -96,7 +94,7 @@ class ctc_beam:
             
 class ctc_log_beam(ctc_beam):
     
-    def __init__(self, init_string = (), pb = -np.inf, pnb = -np.inf, ptxt = -np.inf, c_txt = .5):
+    def __init__(self, init_string = (), pb = -np.inf, pnb = -np.inf, ptxt = -np.inf, c_txt = 1):
         super().__init__()
         self.string = init_string
         self.pb = pb # probability of trailing blank
@@ -107,7 +105,7 @@ class ctc_log_beam(ctc_beam):
     def __str__(self):
         return "'{}' Abs: {}, Ptot: {}, Pnb: {}, Pb: {}, Ptxt: {}".format(self.string, round(merge_logs(self.pb, self.pnb) + self.c_txt * self.ptxt, 3), round(merge_logs(self.pb, self.pnb), 3), round(self.pnb, 3), round(self.pb, 3), round(self.ptxt, 3))
         
-    def set_log_ptxt(self, new_letter, model, size = 2):
+    def set_log_ptxt(self, new_letter, model, size = 2): # sets language model probability
         chars = list(self.string[-size:])
         
         # while len(chars) < size:
@@ -125,7 +123,7 @@ class ctc_log_beam(ctc_beam):
         self.log_ptot = merge_logs(self.pb, self.pnb)
         return self.log_ptot
     
-class ctc_beam_dict:
+class ctc_beam_dict: # holds hypothesis beams, handles score merging, returns top n
     
     def __init__(self):
         self.dict = {}
@@ -240,7 +238,7 @@ def beam_decoder(pred, to_letter, n_beams = 3, n_chars = 5):
         
     return end_beam.string.replace(",", "")
             
-def log_beam_decoder(pred, to_target, phonemes, n_beams = 3, n_chars = 5, c_txt = 1):
+def log_beam_decoder(pred, to_target, phonemes, n_beams = 3, n_chars = 5, c_txt = .5):
     
     lang_model = pickle.load(open("lang_models\\{}_model_{}gram.pck".format("phoneme" if phonemes else "char", str(n_chars)), "rb"))
     best_beams = [ctc_log_beam(pnb = 0, ptxt = math.log(.1))]
@@ -279,7 +277,7 @@ def log_beam_decoder(pred, to_target, phonemes, n_beams = 3, n_chars = 5, c_txt 
         
     return end_beam.string
                     
-def normalize_best(best):
+def normalize_best(best): # can be used to normalize beam scores to prevent underflow in non-log decoder
     prob_list = []
     
     for beam in best:
@@ -291,7 +289,7 @@ def normalize_best(best):
         beam.pb /= prob_sum
         beam.pnb /= prob_sum
         
-def list_scores(beams):
+def list_scores(beams): # for debugging beam search, lists beams and some stats
     
     for i, beam in enumerate(beams, 1):
         print("{}) {}".format(i, beam))
@@ -337,4 +335,4 @@ def phones_2_words(phones):
     return sentence[:-1]
 
 # test_fn(phonemes = False)
-show_predictions(3, phonemes = False)
+# show_predictions(3, phonemes = False, norm = False)
