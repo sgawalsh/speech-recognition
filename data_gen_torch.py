@@ -122,7 +122,7 @@ def data_generator_torch_single(device, is_train = True, path = "processed_data\
         
         yield x, y, y_length
         
-def get_n(device, phones, n = 10, is_train = True, data_path = "processed_data\\train\\", seed = -1, norm = False, is_2d = False):
+def get_n(device, phones, n = 10, is_train = True, data_path = "processed_data\\train\\", seed = 0, norm = False, is_2d = False):
     
     data_path = "{}{}\\{}\\".format(data_path, project_vars.base_channels, "train" if is_train else "eval")
     
@@ -132,7 +132,8 @@ def get_n(device, phones, n = 10, is_train = True, data_path = "processed_data\\
     
     if seed >= 0:
         random.seed(seed)
-        random.shuffle(files)
+        
+    random.shuffle(files)
     
     files = files[:n]
     

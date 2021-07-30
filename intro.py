@@ -17,7 +17,7 @@ from decoder import log_beam_decoder
 
 def intro(phonemes, c_txt = .5, n_beams = 3, norm = True, model_name = "best_weights.pt", write_file = True):
 
-    print("c = {}, beams = {}\n".format(c_txt, n_beams))
+    print("c_lang = {}, n_beams = {}\n".format(c_txt, n_beams))
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
@@ -51,8 +51,6 @@ def intro(phonemes, c_txt = .5, n_beams = 3, norm = True, model_name = "best_wei
         x = torch.from_numpy(in_data).float().to(device)
         pred = model(torch.unsqueeze(x, 0))
         
-        print(a_f)
-        
         with open("intro\\trans\\{}.txt".format(f_name)) as f:
                 print("Target: {}".format(f.read()))
                 
@@ -60,7 +58,7 @@ def intro(phonemes, c_txt = .5, n_beams = 3, norm = True, model_name = "best_wei
         
         for c in c_txt:
             output = log_beam_decoder(pred.squeeze().T, to_targ, phonemes, n_beams = n_beams, n_chars = 5, c_txt = c)
-            print("Predicted: {}".format("".join(output)))
+            print("Predicted: {}\n".format("".join(output)))
         
         # if write_file:
             # sf.write("intro\\wav\\{}.wav".format(f_name), data, fs) 

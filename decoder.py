@@ -14,6 +14,11 @@ import pickle
 import numpy as np
 import models
 from pathlib import Path
+import matplotlib.pyplot as plt
+
+from os import system
+import gc
+
 
 def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = False, model_name = "best_weights.pt", is_2d = False, norm = False):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -41,7 +46,7 @@ def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = F
         # with open("test_preds.pck", "wb") as df:
         #     pickle.dump([pred.detach().cpu().numpy(), xy[1]], df)
         
-        greedy = greedy_decoder(pred, to_target)
+        # greedy = greedy_decoder(pred, to_target)
         beam_output = log_beam_decoder(pred, to_target, phonemes)
         
         # if phonemes:
@@ -51,15 +56,15 @@ def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = F
             
         beam_output = "".join(beam_output)
         
-        exploded = explode_preds(pred, to_target)
+        # exploded = explode_preds(pred, to_target)
         
         if phonemes:
             print("Target Phonemes: {}\n".format(xy[2]))
             
-        print("{}) Target: {}\n\nOutput: {}\n".format(i, xy[1], beam_output))
-        print("Greedy: {}\n\nExploded: {}\n".format(greedy, exploded))
+        print("{})\n Target: {}\n\nOutput: {}\n".format(i, xy[1], beam_output))
+        # print("Greedy: {}\n\nExploded: {}\n".format(greedy, exploded))
         
-        # wer(xy[1].split(' '), beam_output.split(' '))
+        print("WER: {}".format(round(wer(xy[1].split(' '), beam_output.split(' ')), 2)))
         
 class ctc_beam:
     
@@ -334,5 +339,165 @@ def phones_2_words(phones):
     
     return sentence[:-1]
 
+def binary_search(scores, weighted_scores, best_score, best_c, last_c, jump, going_up, progress, curr_depth, depth, n_samples, model, to_target, device, phonemes): # using recursion makes you feel smart
+    
+    if curr_depth == depth:
+        return best_c, best_score, scores, weighted_scores
+    
+    score = 0.0
+    weighted_score_list = []
+    new_c = last_c + (1 if going_up else -1) * jump
+    
+    for xy in data_gen_torch.get_n(device, phonemes, n = n_samples, is_train = True, seed = -1):
+        pred = model(torch.unsqueeze(xy[0], 0))
+        pred = pred.squeeze().T
+        
+        beam_output = log_beam_decoder(pred, to_target, phonemes, c_txt = new_c)
+        beam_output = "".join(beam_output)
+        
+        new_score = wer(xy[1].split(' '), beam_output.split(' '))
+        score += new_score
+        weighted_score_list.append((len(xy[1].split(' ')), new_score))
+        
+        
+    score /= n_samples # average wer
+    scores.append((new_c, score))
+    weighted_scores.append((new_c, weighted_average(weighted_score_list)))
+    
+    print("Depth: {}, Testing: {}, Score: {}".format(curr_depth + 1, new_c, score))
+    
+    if score < best_score:
+        print("New Best!!!!!!!!!")
+        best_score = score
+        best_c = new_c
+        jump /= 2
+        progress = True
+    else:
+        going_up = not going_up
+        new_c = last_c
+        if not progress:
+            jump /= 2
+            print("zeroing in")
+        progress = not progress
+        
+    return binary_search(scores, weighted_scores, best_score, best_c, new_c, jump, going_up, progress, curr_depth + 1, depth, n_samples, model, to_target, device, phonemes)
+            
+def binary_search_init(floor, ceil, depth, n_samples = 5, phonemes = False, is_2d = False, norm = False, model_name = "best_weights.pt", save = True): # finds best value for c_txt between floor (inclusive) and ceil(exclusive)
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    if phonemes:
+        model = models.wav2phoneme_torch_2d() if is_2d else models.wav2phoneme_torch()
+        to_target = [None] + list(project_vars.phoneme_map.keys())
+    else:
+        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch_test2()
+        to_target = [None] + list(project_vars.letter_map.keys())
+        
+    model.to(device)
+    model_path = "models\\{}\\{}\\{}\\{}".format("phonemes" if phonemes else "letters", model.__class__.__name__, project_vars.base_channels, "norm\\" if norm else "")
+    Path(model_path).mkdir(parents=True, exist_ok=True)
+    model.load_state_dict(torch.load(model_path + model_name))
+    
+    best_c, best_score, scores, appended_scores = binary_search([], [], 100, None, -(ceil - floor), (ceil - floor), True, True, 0, depth, n_samples, model, to_target, device, phonemes)
+    
+    make_plot(scores, model.__class__.__name__, model_name, phonemes, n_samples, "binary", save)
+    make_plot(scores, model.__class__.__name__, model_name, phonemes, n_samples, "binary - appended", save)
+    make_plot_combined([[scores, "Average"], [appended_scores, "Appended"]], model.__class__.__name__, model_name, phonemes, n_samples, "binary - combined", save)
+    
+def grid_search(start, end, step = .1, n_samples = 5, phonemes = False, is_2d = False, model_name = "best_weights.pt", norm = False, save = True, seed = 0):
+    
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    if phonemes:
+        model = models.wav2phoneme_torch_2d() if is_2d else models.wav2phoneme_torch()
+        to_target = [None] + list(project_vars.phoneme_map.keys())
+    else:
+        model = models.wav2letter_torch_2d() if is_2d else models.wav2letter_torch_test2()
+        to_target = [None] + list(project_vars.letter_map.keys())
+        
+    model.to(device)
+    model_path = "models\\{}\\{}\\{}\\{}".format("phonemes" if phonemes else "letters", model.__class__.__name__, project_vars.base_channels, "norm\\" if norm else "")
+    Path(model_path).mkdir(parents=True, exist_ok=True)
+    model.load_state_dict(torch.load(model_path + model_name))
+    
+    scores, weighted_scores = [], []
+    best_score = 100
+    
+    for c in np.arange(start, end + step, step):
+        print("checking {}".format(round(c, 2)))
+        total_score = 0.0
+        weighted_score_list = []
+        for xy in data_gen_torch.get_n(device, phonemes, n = n_samples, is_train = True, seed = seed):
+            pred = model(torch.unsqueeze(xy[0], 0))
+            pred = pred.squeeze().T
+            
+            beam_output = log_beam_decoder(pred, to_target, phonemes, c_txt = c)
+            beam_output = "".join(beam_output)
+            
+            new_score = wer(xy[1].split(' '), beam_output.split(' '))
+            total_score += new_score
+            weighted_score_list.append((len(xy[1].split(' ')), new_score))
+            
+        total_score /= n_samples # average wer
+        scores.append((c, total_score))
+            
+        weighted_scores.append((c, weighted_average(weighted_score_list)))
+        
+        if total_score < best_score:
+            best_score = total_score
+            best_c = c
+            
+        # del word_target
+        # del word_pred
+        # del pred
+        # del beam_output
+        
+        # gc.collect()
+        
+    print("Best Score: {}, C: {}".format(best_score, best_c))
+    
+    make_plot(scores, model.__class__.__name__, model_name, phonemes, n_samples, "grid", save)
+    make_plot(weighted_scores, model.__class__.__name__, model_name, phonemes, n_samples, "grid - weighted", save)
+    make_plot_combined([[scores, "Average"], [weighted_scores, "Weighted"]], model.__class__.__name__, model_name, phonemes, n_samples, "grid - combined", save)
+        
+def make_plot(scores, class_name, model_name, phonemes, n_samples, method, save):
+    title = "{} - Name {} - Method {} - Phonemes {} - n {}".format(class_name, model_name, method, phonemes, n_samples)
+    plt.title(class_name + " - " + model_name)
+    plt.scatter(*zip(*scores))
+    
+    if save:
+        plt.savefig("saved_plots\\" + title + ".png")
+    else:
+        plt.show()
+        
+    plt.clf()
+        
+def make_plot_combined(scores, class_name, model_name, phonemes, n_samples, method, save):
+    title = "{} - Name {} - Method {} - Phonemes {} - n {}".format(class_name, model_name, method, phonemes, n_samples)
+    plt.title(class_name + " - " + model_name)
+    for set in scores:
+        plt.scatter(*zip(*set[0]), label = set[1])
+    plt.legend()
+    
+    if save:
+        plt.savefig("saved_plots\\" + title + ".png")
+    else:
+        plt.show()
+        
+    plt.clf()
+
+def weighted_average(weight_scores):
+    num, den = 0, 0
+    for el in weight_scores:
+        num += el[0] * el[1]
+        den += el[0]
+        
+    return num / den
+
 # test_fn(phonemes = False)
 # show_predictions(3, phonemes = False, norm = False)
+
+# grid_search(.3, .7, .15, n_samples = 5)
+# binary_search_init(0, 2, 8, n_samples = 30)
+# grid_search(.3, 1.95, .15, n_samples = 40)
+
+# system('shutdown -s')
