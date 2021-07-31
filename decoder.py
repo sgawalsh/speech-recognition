@@ -16,9 +16,6 @@ import models
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-from os import system
-import gc
-
 
 def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = False, model_name = "best_weights.pt", is_2d = False, norm = False):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -37,26 +34,22 @@ def show_predictions(n_samples = 3, data_path = "processed_data\\", phonemes = F
     
     for i, xy in enumerate(data_gen_torch.get_n(device, phonemes, n = n_samples, is_train = True, seed = -1), 1):
         
-        # pred = model(xy[0].reshape(1, project_vars.base_channels * 3, -1))
-        # pred = pred.reshape(out_shape, -1).T.cpu()
-        
         pred = model(torch.unsqueeze(xy[0], 0))
         pred = pred.squeeze().T
         
-        # with open("test_preds.pck", "wb") as df:
+        # with open("test_preds.pck", "wb") as df: # using test outputs for debugging
         #     pickle.dump([pred.detach().cpu().numpy(), xy[1]], df)
         
         # greedy = greedy_decoder(pred, to_target)
+        # exploded = explode_preds(pred, to_target)
         beam_output = log_beam_decoder(pred, to_target, phonemes)
         
         # if phonemes:
-        #     beam_output = phones_2_words(beam_output)
+        #     beam_output = phones_2_words(beam_output) # words can be found from phonemes, but homonyms are a problem, can just use the phonemes as they are
         # else:
         #     beam_output = "".join(beam_output)
             
         beam_output = "".join(beam_output)
-        
-        # exploded = explode_preds(pred, to_target)
         
         if phonemes:
             print("Target Phonemes: {}\n".format(xy[2]))
@@ -165,13 +158,10 @@ def merge_logs(a, b):
     else:
         mx, mn = (a, b) if a > b else (b, a)
         
-        # log_out = mx + np.log1p(np.exp(mn - mx)) # = b + ln(exp(a - b) + 1) = ln(exp(a) + exp(b))
-        # lg_out2 = math.log(np.exp(a) + np.exp(b))
-        
         return mx + torch.log1p(torch.exp(mn - mx)) # = b + ln(exp(a - b) + 1) = ln(exp(a) + exp(b))
         # return mx + np.log1p(np.exp(mn - mx)) # numpy equivalent for debugging
 
-def test_fn(phonemes = True):
+def test_fn(phonemes = True): # testing using saved predictions
     
     if phonemes:
         pred = pickle.load(open("test_preds_phones.pck", "rb"))
@@ -203,12 +193,6 @@ def beam_decoder(pred, to_letter, n_beams = 3, n_chars = 5):
     for inc, step in enumerate(pred, 1):
         #print("{} of {}".format(inc, len(pred)))
         probs = torch.exp(step) # log scores to probabilities
-        #probs = np.exp(step)
-        
-        # if not probs.argmax() and not initialized:
-        #     continue
-        # else:
-        #     initialized = True
         
         beams = ctc_beam_dict()
         
@@ -237,7 +221,7 @@ def beam_decoder(pred, to_letter, n_beams = 3, n_chars = 5):
                 beams.merge(new_beam)
                 
         best_beams = beams.get_best(n_beams)
-        # normalize_best(best_beams)
+        # normalize_best(best_beams) # can normalize to prevent numerical underflow
         
     end_beam = beams.get_best(1)[0]
         
@@ -445,13 +429,6 @@ def grid_search(start, end, step = .1, n_samples = 5, phonemes = False, is_2d = 
         if total_score < best_score:
             best_score = total_score
             best_c = c
-            
-        # del word_target
-        # del word_pred
-        # del pred
-        # del beam_output
-        
-        # gc.collect()
         
     print("Best Score: {}, C: {}".format(best_score, best_c))
     
@@ -499,5 +476,3 @@ def weighted_average(weight_scores):
 # grid_search(.3, .7, .15, n_samples = 5)
 # binary_search_init(0, 2, 8, n_samples = 30)
 # grid_search(.3, 1.95, .15, n_samples = 40)
-
-# system('shutdown -s')

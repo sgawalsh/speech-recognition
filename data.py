@@ -16,8 +16,6 @@ from numpy import diff
 import nltk
 from pathlib import Path
 
-# Path(model_path).mkdir(parents=True, exist_ok=True)
-
 SEED = 0
 
 def gen_db(path = "data\\dev-clean.tar\\dev-clean\\"):
@@ -141,5 +139,3 @@ def inv_phoneme_dict():
     
     with open("phones_2_words.pck", "wb") as f:
         pickle.dump(inv_dict, f)
-        
-gen_db_files()

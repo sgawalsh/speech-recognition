@@ -56,11 +56,6 @@ def data_generator_torch_batch(batch_size, device, is_train = True, is_dev = Fal
             xy = pickle.load(open("{}{}".format(path, f), "rb"))
             
             sentence = [targ_map[char] for char in xy[1]]
-            
-            # x.append(torch.from_numpy(concatenate(xy[0])).float().to(device))
-            # x.append(torch.from_numpy(normalize(concatenate(xy[0]))).float().to(device)) # normalized input
-            # x.append(torch.from_numpy(normalize(to_2d(xy[0]))).float().to(device)) # normalized 2d input
-            
             x.append(torch.from_numpy(get_x(xy[0])).float().to(device))
             
             y.append(sentence)

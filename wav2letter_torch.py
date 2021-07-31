@@ -359,8 +359,6 @@ def save_new(): # save existing weights to new model
     e_loss = eval_cycle(model, device, batch_size = 10, phones = False, norm = False)
     print(e_loss)
     torch.save(model.state_dict(), "models\\letters\\wav2letter_torch_test2\\13\\best_weights.pt")
-    
-# save_new()
 
 train_batch(
     batch_size = 10,
@@ -377,7 +375,4 @@ train_batch(
 
 
 # plot_history(load(open("models\\\phonemes\\wav2phoneme_torch_12_80\\13\\best_weights.pt_history.pck", "rb")))
-
-# train_single(epochs = 3, draw_plot = True, roll_avg_period = 100)
 # test_weights(models.wav2letter_torch_test2, phones = False, norm = True)
-# test_weights(models.wav2letter_torch_test2, phones = False, norm = False)
